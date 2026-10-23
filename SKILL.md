@@ -100,6 +100,7 @@ PY
 - `snapshot()` first on every new page. Modals are detected and listed alone. Elements below the fold are tagged and scrolled into view on click.
 - `click_text("Save")`, `fill_label("Email", "x@y.com")`, `click_ref(12)`, `fill_ref(3, "...")`, `select_ref(7, "Option")` for single actions; `act(...)` to chain them. Prefer names (strings) inside `act`, they are re-resolved at each step; int refs go stale when the DOM changes (use `("snap",)` to renumber).
 - Warnings like `# warning: 2 elements match` mean ambiguous text: pass `nth=` or a ref.
+- Repeated names (a "Delete" or checkbox per list row) are shown as `in row "<row text>"`: pick the right one by its ref. `("dblclick", ...)` / `click_text(..., clicks=2)` double-click, e.g. to start inline editing. Custom checkboxes hidden at opacity 0 are listed too.
 - Put the verification in the same call (`read(grep=...)`, `page_info()`, `js(...)` returning the value you care about) instead of taking a screenshot.
 - Take `capture_screenshot()` only when: the snapshot shows an iframe/canvas you cannot read, the result is visual (layout, colors, image), a click had no effect and the DOM does not explain why, or the user asked to see it.
 - Coordinate clicking (`click_at_xy`) is the fallback for canvas, iframes and elements the snapshot cannot see. Hit-testing happens in Chrome's browser process, so clicks go through iframes / shadow DOM / cross-origin.

@@ -33,6 +33,8 @@ _SNAPSHOT_JS = r"""
     const r = e.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) return false;
     const cs = getComputedStyle(e);
+    // custom checkboxes/radios are often real inputs at opacity 0 over a styled label: still clickable
+    if (e.tagName === 'INPUT' && (e.type === 'checkbox' || e.type === 'radio')) return cs.visibility !== 'hidden' && cs.display !== 'none';
     return cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0';
   };
   const labelOf = e => {
@@ -100,6 +102,9 @@ _SNAPSHOT_JS = r"""
     if (e.getAttribute('aria-expanded') != null) o.expanded = e.getAttribute('aria-expanded') === 'true';
     if (e.getAttribute('aria-selected') === 'true' || e.getAttribute('aria-current')) o.selected = true;
     if (e.required) o.required = true;
+    // list/table rows: show the row text so repeated names ("Toggle Todo", "Delete") can be told apart
+    const row = e.closest('li,tr,[role=row],[role=listitem]');
+    if (row) { const rt = norm(row.innerText).slice(0, 50); if (rt && rt !== o.name) o.row = rt; }
     if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) o.off = r.top > vh ? 'below' : (r.bottom < 0 ? 'above' : 'side');
     return { o, e };
   });
@@ -128,6 +133,8 @@ def _fmt(i, o):
         s += f' = "{o["value"]}"'
     if o.get("href"):
         s += f' -> {o["href"]}'
+    if o.get("row"):
+        s += f' in row "{o["row"]}"'
     if flags:
         s += " (" + ", ".join(flags) + ")"
     if o.get("off"):
@@ -244,9 +251,10 @@ def _find(text, roles=None, nth=0, snap=None):
     return hits[min(nth, len(hits) - 1)]
 
 
-def click_text(text, nth=0, roles=None):
+def click_text(text, nth=0, roles=None, clicks=1):
     """Click the interactive element whose accessible name matches text (e.g. click_text('Save')).
-    Falls back to any visible element containing that text if no interactive one matches."""
+    Falls back to any visible element containing that text if no interactive one matches.
+    clicks=2 double-clicks (e.g. to start inline editing)."""
     d = snapshot(show=False)
     try:
         i, o = _find(text, roles, nth, d)
@@ -262,9 +270,9 @@ def click_text(text, nth=0, roles=None):
         if not r:
             raise err
         c = _json.loads(r)
-        _h().click_at_xy(c["x"], c["y"])
+        _h().click_at_xy(c["x"], c["y"], clicks=clicks)
         return f"(loose text) {text}"
-    click_ref(i)
+    click_ref(i, clicks=clicks)
     return _fmt(i, o)
 
 
@@ -296,6 +304,7 @@ def act(*steps, snap=True, delay=0.0):
 
     Steps (tuples; an int means a ref from the last snapshot, a str means a name):
       ("goto", url)            ("click", "Save" | 12)       ("fill", "Name" | 5, "text")
+      ("dblclick", "Item 4")   double-click, e.g. to start inline editing
       ("submit", "Search", "text")  fill + Enter             ("select", 7, "Option")
       ("key", "Enter")         ("wait", 1.5)                  ("text", "regex")  -> print matching lines
       ("snap",)                refresh the ref numbers mid-batch (do this after the DOM changes)
@@ -311,6 +320,10 @@ def act(*steps, snap=True, delay=0.0):
             elif op == "click":
                 if isinstance(args[0], int): click_ref(args[0])
                 else: click_text(args[0], *(args[1:2] or [0]))
+                settle()
+            elif op == "dblclick":
+                if isinstance(args[0], int): click_ref(args[0], clicks=2)
+                else: click_text(args[0], *(args[1:2] or [0]), clicks=2)
                 settle()
             elif op == "fill":
                 if isinstance(args[0], int): fill_ref(args[0], args[1])
