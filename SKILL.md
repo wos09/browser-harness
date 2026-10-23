@@ -81,20 +81,38 @@ If you start struggling with a specific mechanic while navigating, look in inter
 
 ## What actually works
 
-- Screenshots first: use capture_screenshot() to understand the current page quickly, find visible targets, and decide whether you need a click, a selector, or more navigation.
-- Clicking: capture_screenshot() → read the pixel off the image → click_at_xy(x, y) → capture_screenshot() to verify. Suppress the Playwright-habit reflex of "locate first, then click" — no getBoundingClientRect, no selector hunt. Drop to DOM only when the target has no visible geometry (hidden input, 0×0 node). Hit-testing happens in Chrome's browser process, so clicks go through iframes / shadow DOM / cross-origin without extra work.
-- Bulk HTTP: http_get(url) + ThreadPoolExecutor. No browser for static pages (249 Netflix pages in 2.8s).
-- After goto: wait_for_load().
+**DOM first, screenshot last.** A screenshot round trip costs seconds and thousands of tokens; reading the DOM costs milliseconds. The helpers in `agent-workspace/agent_helpers.py` (pre-imported) are the default way to drive a page:
+
+```bash
+browser-harness <<'PY'
+new_tab("https://example.com/form"); wait_for_load()
+snapshot()                      # numbered list of buttons/links/inputs/selects, with values and state
+act(                            # several actions in ONE call; prints a fresh snapshot at the end
+  ("fill", "Name", "Maria"),    # by label/placeholder/name (string) or by ref (int)
+  ("select", "State", "CA"),
+  ("click", "Agree"),
+  ("click", "Save"),
+)
+print(read(grep="success|error"))  # visible text, filtered by regex
+PY
+```
+
+- `snapshot()` first on every new page. Modals are detected and listed alone. Elements below the fold are tagged and scrolled into view on click.
+- `click_text("Save")`, `fill_label("Email", "x@y.com")`, `click_ref(12)`, `fill_ref(3, "...")`, `select_ref(7, "Option")` for single actions; `act(...)` to chain them. Prefer names (strings) inside `act`, they are re-resolved at each step; int refs go stale when the DOM changes (use `("snap",)` to renumber).
+- Warnings like `# warning: 2 elements match` mean ambiguous text: pass `nth=` or a ref.
+- Put the verification in the same call (`read(grep=...)`, `page_info()`, `js(...)` returning the value you care about) instead of taking a screenshot.
+- Take `capture_screenshot()` only when: the snapshot shows an iframe/canvas you cannot read, the result is visual (layout, colors, image), a click had no effect and the DOM does not explain why, or the user asked to see it.
+- Coordinate clicking (`click_at_xy`) is the fallback for canvas, iframes and elements the snapshot cannot see. Hit-testing happens in Chrome's browser process, so clicks go through iframes / shadow DOM / cross-origin.
+- Bulk HTTP: http_get(url) + ThreadPoolExecutor. No browser for static pages (249 Netflix pages in 2.8s). If the page loads data from an API, find it with interaction-skills/network-requests.md and call it directly.
+- After goto: wait_for_load(). `act`/`click_*` already settle after each step.
 - Wrong/stale tab: ensure_real_tab(). Use it when the current tab is stale or internal; the daemon also auto-recovers from stale sessions on the next call.
-- Verification: print(page_info()) is the simplest "is this alive?" check, but screenshots are the default way to verify whether a visible action actually worked.
-- DOM reads: use js(...) for inspection and extraction when the screenshot shows that coordinates are the wrong tool.
-- Iframe sites (Azure blades, Salesforce): click_at_xy(x, y) passes through; only drop to iframe DOM work when coordinate clicks are the wrong tool.
+- DOM reads beyond the snapshot: use js(...) for inspection and extraction.
 - Auth wall: redirected to login → stop and ask the user. Don't type credentials from screenshots.
 - Raw CDP for anything helpers don't cover: cdp("Domain.method", params).
 
 ## Design constraints
 
-- Coordinate clicks default. Input.dispatchMouseEvent goes through iframes/shadow/cross-origin at the compositor level.
+- DOM refs by default (snapshot/act); clicks are still real CDP Input events. Coordinate clicks are the fallback for canvas/iframes.
 - Connect to the user's running Chrome. Don't launch your own browser.
 - cdp-use is only for CDPClient.send_raw. Prefer raw CDP strings over typed wrappers.
 - run.py stays tiny. No argparse, subcommands, or extra control layer.
@@ -109,9 +127,9 @@ If you start struggling with a specific mechanic while navigating, look in inter
 - Browser Use API is camelCase on the wire. cdpUrl, proxyCountryCode, etc.
 - Remote cdpUrl is HTTPS, not ws. Resolve the websocket URL via /json/version.
 - Stop cloud browsers with PATCH /browsers/{id} + {"action":"stop"}.
-- After every meaningful action, re-screenshot before assuming it worked. Use the image to verify changed state, open menus, navigation, visible errors, and whether the page is in the state you expected.
-- Use screenshots to drive exploration. They are often the fastest way to find the next click target, notice hidden blockers, and decide if a selector is even worth writing.
-- Prefer compositor-level actions over framework hacks. Try screenshots, coordinate clicks, and raw key input before adding DOM-specific workarounds.
+- After every meaningful action, verify through the DOM in the same call (`act` ends with a snapshot; add `read(grep=...)` or `page_info()` for success/error text). Screenshot only when the check is visual.
+- Explore with `snapshot()` and `read()`, not screenshots. Fall back to a screenshot when the snapshot cannot explain what you see (canvas, iframe, overlay).
+- Prefer `click_ref`/`click_text` (real CDP mouse events at the element's center) over framework hacks. If a control ignores them, try coordinate clicks and raw key input before DOM-specific workarounds.
 - If you need framework-specific DOM tricks, check interaction-skills/ first. That is where dropdown, dialog, iframe, shadow DOM, and form-specific guidance belongs.
 
 ## Domain skills (opt-in)
